@@ -80,21 +80,21 @@ func getJSON[T validator](ctx context.Context, c *Client, path string, out *T) e
 }
 
 type httpError struct {
-	status int
-	path   string
-	ray    string // Cloudflare's Cf-Ray, set when the refusal came from the CDN
-	body   string // one-line, truncated response body
+	status    int
+	path      string
+	ray       string // Cloudflare's Cf-Ray, set when the refusal came from the CDN
+	server    string // Server, "cloudflare" when the CDN answered rather than FPL
+	mitigated string // Cf-Mitigated, "challenge" when a bot rule fired
+	bodyLen   int
+	body      string // one-line, truncated response body
 }
 
 func (e *httpError) Error() string {
-	msg := fmt.Sprintf("fpl: %s returned %d", e.path, e.status)
-	if e.ray != "" {
-		msg += " (cf-ray " + e.ray + ")"
-	}
-	if e.body != "" {
-		msg += ": " + e.body
-	}
-	return msg
+	// The tail is unconditional. An absent ray and an empty body are themselves
+	// the diagnosis, and omitting them makes this indistinguishable from the
+	// bare status line an older build emitted.
+	return fmt.Sprintf("fpl: %s returned %d [cf-ray=%q server=%q mitigated=%q body=%dB] %s",
+		e.path, e.status, e.ray, e.server, e.mitigated, e.bodyLen, e.body)
 }
 
 // snippet flattens a body to one truncated line. A CDN block page is multi-line
@@ -127,10 +127,13 @@ func (c *Client) do(ctx context.Context, path string, out any) error {
 	if res.StatusCode != http.StatusOK {
 		b, _ := io.ReadAll(io.LimitReader(res.Body, 4<<10))
 		return &httpError{
-			status: res.StatusCode,
-			path:   path,
-			ray:    res.Header.Get("Cf-Ray"),
-			body:   snippet(b),
+			status:    res.StatusCode,
+			path:      path,
+			ray:       res.Header.Get("Cf-Ray"),
+			server:    res.Header.Get("Server"),
+			mitigated: res.Header.Get("Cf-Mitigated"),
+			bodyLen:   len(b),
+			body:      snippet(b),
 		}
 	}
 

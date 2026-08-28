@@ -1,32 +1,41 @@
 locals {
-  use_discord = var.notify_channel == "discord"
-  use_slack   = var.notify_channel == "slack"
+  # The Lambda takes one env var, not a set per league. Map iteration is
+  # lexicographic by key, so the order is stable and re-editing the map does
+  # not churn the plan. Parameter names travel here; the URLs behind them
+  # never do.
+  leagues_json = jsonencode([
+    for k, l in var.leagues : {
+      id           = l.id
+      channel      = l.channel
+      webhookParam = l.webhook_param
+    }
+  ])
 
-  # The webhook-bearing channels differ only in which parameter holds the URL,
-  # so the IAM grant is written once against whichever one is selected.
-  webhook_param = local.use_discord ? var.discord_webhook_param : (local.use_slack ? var.slack_webhook_param : "")
+  # Every distinct parameter the fleet will read. Two leagues sharing a webhook
+  # collapse to one grant; a league on the log channel contributes none.
+  webhook_params = distinct([
+    for l in var.leagues : l.webhook_param if l.webhook_param != ""
+  ])
 
   # Built rather than looked up: reading the parameter would pull the webhook URL
   # into Terraform state, which is the one thing this arrangement avoids.
-  #
-  # A list of at most one, so the log channel grants nothing at all.
-  webhook_param_arns = local.webhook_param == "" ? [] : [format(
-    "arn:aws:ssm:%s:%s:parameter/%s",
-    var.region,
-    data.aws_caller_identity.current.account_id,
-    trimprefix(local.webhook_param, "/"),
-  )]
+  webhook_param_arns = [
+    for p in local.webhook_params : format(
+      "arn:aws:ssm:%s:%s:parameter/%s",
+      var.region,
+      data.aws_caller_identity.current.account_id,
+      trimprefix(p, "/"),
+    )
+  ]
 }
 
 # Fail at plan time rather than on the first invocation.
 check "channel_settings" {
   assert {
-    condition     = !local.use_discord || var.discord_webhook_param != ""
-    error_message = "discord_webhook_param is required when notify_channel is discord."
-  }
-
-  assert {
-    condition     = !local.use_slack || var.slack_webhook_param != ""
-    error_message = "slack_webhook_param is required when notify_channel is slack."
+    condition = alltrue([
+      for l in var.leagues :
+      l.webhook_param != "" if contains(["discord", "slack"], l.channel)
+    ])
+    error_message = "Every league on discord or slack needs a webhook_param."
   }
 }

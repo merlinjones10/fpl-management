@@ -2,9 +2,9 @@ title: fpl-league-bot — one tick
 
 note:
 **At 09:00 and 21:00**, one Lambda wakes up, reads the live FPL state and works
-out whether anything is due. Nothing is scheduled against the calendar:
-gameweek deadlines move, and only 21 of 37 gaps in the season are actually 7
-days apart.
+out whether anything is due — for **every league in** `LEAGUES`. Nothing is
+scheduled against the calendar: gameweek deadlines move, and only 21 of 37 gaps
+in the season are actually 7 days apart.
 
 The interval only bounds _how late_ a message can be — never when it is sent.
 Those hours are chosen because that is when the digest gets pasted into the
@@ -16,7 +16,22 @@ Scheduler -> Tick: invoke — `cron(0 9,21 * * ? *)` _(Europe/London)_
 Tick -> FPL: GET `/bootstrap-static/`
 FPL --> Tick: 38 events — `deadline_time`, `is_next`, `data_checked`
 
-Tick -> FPL: GET `/leagues-classic/1058423/standings/`
+note:
+Fetched **once per tick, not once per league**: ~1.6MB, and identical whoever
+is asking. That shared fetch is why all the leagues run from one Lambda rather
+than a stack each — see "Why one Lambda for every league" in README.md.
+
+
+group: For each league in `LEAGUES`
+
+note:
+Everything below is per league: its own standings, its own `LEAGUE#<id>`
+partition, its own sender. Their errors are **joined, not short-circuited**, so
+one league's broken webhook still lets the others send — and each error names
+its league, because a single CloudWatch alarm covers the whole fleet.
+
+
+Tick -> FPL: GET `/leagues-classic/<id>/standings/`
 FPL --> Tick: `league`, `standings.results[]`, `new_entries[]`
 
 note: No auth on either call. Private league standings are readable by ID — membership is never checked.
@@ -78,7 +93,16 @@ if: send fails
 Tick -> DDB: DeleteItem — release the claim
 note: Without this the message is lost forever: the marker would say "sent" and no later tick would retry.
 
-Tick --> Scheduler: error → CloudWatch alarm
+Tick -> Tick: collect the error, carry on to the next league
+
+end
+end
+
+
+if: any league failed
+
+Tick --> Scheduler: `errors.Join` → CloudWatch alarm
+note: Raised **after** every league has had its turn, and the message names each one that failed. The alarm itself cannot tell them apart.
 
 end
 

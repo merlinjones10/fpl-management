@@ -1,29 +1,39 @@
 # Copy to terraform.tfvars and fill in. That file is gitignored.
 
-league_id = 1058423
+# One Lambda serves every league here. Each gets its own DynamoDB partition and
+# its own sender, so they can sit on different channels — or share one.
+#
+# Store each webhook URL yourself, so it never enters Terraform state:
+#   aws ssm put-parameter --name /fpl-league-bot/a-discord \
+#     --type SecureString --value '<WEBHOOK URL>'
+#
+# Discord: Server Settings > Integrations > Webhooks > New Webhook.
+#   Copy a message out with the message menu's "Copy Text" — that returns the
+#   raw source, so *bold* survives the paste into WhatsApp. Dragging a selection
+#   does not: Discord copies the rendered text and drops the markup.
+# Slack:   api.slack.com/apps > Incoming Webhooks > Add New Webhook to Workspace.
+leagues = {
+  a = {
+    id            = 1058423
+    channel       = "discord"
+    webhook_param = "/fpl-league-bot/discord-webhook"
+  }
 
-# --- Discord (default) ----------------------------------------------------
-# 1. Server Settings > Integrations > Webhooks > New Webhook, pick the channel,
-#    Copy Webhook URL.
-# 2. Store it yourself so it never enters Terraform state:
-#      aws ssm put-parameter --name /fpl-league-bot/discord-webhook \
-#        --type SecureString --value '<WEBHOOK URL>'
-# Copy a message out with the message menu's "Copy Text" — that returns the raw
-# source, so *bold* survives the paste into WhatsApp. Dragging a selection does
-# not: Discord copies the rendered text and drops the markup.
-notify_channel = "discord"
-# discord_webhook_param = "/fpl-league-bot/discord-webhook"
+  # A second league can point at the same webhook until it has its own — both
+  # digests then land in that one channel, each headed by its league name.
+  # b = {
+  #   id            = 2222222
+  #   channel       = "discord"
+  #   webhook_param = "/fpl-league-bot/discord-webhook"
+  # }
 
-# --- Slack ------------------------------------------------------------------
-# 1. api.slack.com/apps > Create New App > Incoming Webhooks > Add New Webhook
-#    to Workspace, pick the channel.
-# 2. Store it yourself so it never enters Terraform state:
-#      aws ssm put-parameter --name /fpl-league-bot/slack-webhook \
-#        --type SecureString --value '<WEBHOOK URL>'
-# This channel is read in Slack, not copied on into WhatsApp, so mrkdwn is left
-# on and the bodies render properly as-is.
-# notify_channel      = "slack"
-# slack_webhook_param = "/fpl-league-bot/slack-webhook"
+  # …and moves to its own channel by editing these two lines and re-applying.
+  # c = {
+  #   id            = 3333333
+  #   channel       = "slack"
+  #   webhook_param = "/fpl-league-bot/c-slack"
+  # }
+}
 
 # --- Optional -------------------------------------------------------------
 # reminder_lead_hours = 48

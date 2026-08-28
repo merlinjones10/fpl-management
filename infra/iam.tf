@@ -27,21 +27,23 @@ data "aws_iam_policy_document" "lambda" {
     resources = [aws_dynamodb_table.state.arn]
   }
 
+  # One statement listing every parameter, rather than one statement each: Sids
+  # must be unique within a policy, and the grant is identical either way.
   dynamic "statement" {
-    for_each = local.webhook_param_arns
+    for_each = length(local.webhook_param_arns) > 0 ? [1] : []
 
     content {
-      sid       = "ReadWebhookURL"
+      sid       = "ReadWebhookURLs"
       actions   = ["ssm:GetParameter"]
-      resources = [statement.value]
+      resources = local.webhook_param_arns
     }
   }
 
   dynamic "statement" {
-    for_each = local.webhook_param_arns
+    for_each = length(local.webhook_param_arns) > 0 ? [1] : []
 
     content {
-      sid     = "DecryptWebhookURL"
+      sid     = "DecryptWebhookURLs"
       actions = ["kms:Decrypt"]
       # The AWS-managed aws/ssm key has no stable ARN to name here, so scope
       # the wildcard by the service that may use it instead.

@@ -1,5 +1,6 @@
 // Command tick is the Lambda entry point. EventBridge Scheduler invokes it at
-// 09:00 and 21:00; it decides for itself whether anything is due.
+// 09:00 and 21:00; it decides for itself whether anything is due, for every
+// league in LEAGUES.
 package main
 
 import (
@@ -29,14 +30,14 @@ import (
 func main() {
 	log := slog.New(slog.NewJSONHandler(os.Stdout, nil))
 
-	application, err := build(context.Background(), log)
+	fleet, err := build(context.Background(), log)
 	if err != nil {
 		log.Error("startup failed", "err", err)
 		os.Exit(1)
 	}
 
-	lambda.Start(func(ctx context.Context) (app.Result, error) {
-		res, err := application.Tick(ctx, time.Now().UTC())
+	lambda.Start(func(ctx context.Context) (app.FleetResult, error) {
+		res, err := fleet.Tick(ctx, time.Now().UTC())
 		if err != nil {
 			log.Error("tick failed", "err", err)
 		}
@@ -44,7 +45,7 @@ func main() {
 	})
 }
 
-func build(ctx context.Context, log *slog.Logger) (*app.App, error) {
+func build(ctx context.Context, log *slog.Logger) (*app.Fleet, error) {
 	cfg, err := appcfg.Load()
 	if err != nil {
 		return nil, err
@@ -55,33 +56,51 @@ func build(ctx context.Context, log *slog.Logger) (*app.App, error) {
 		return nil, err
 	}
 
-	sender, err := buildSender(ctx, cfg, awsCfg)
-	if err != nil {
-		return nil, err
-	}
-	log.Info("delivery configured", "channel", cfg.Channel, "dryRun", cfg.DryRun)
+	client := fpl.New()
+	db := dynamodb.NewFromConfig(awsCfg)
+	ssmClient := ssm.NewFromConfig(awsCfg)
 
-	st := store.New(dynamodb.NewFromConfig(awsCfg), cfg.TableName, cfg.LeagueID)
-	return app.New(cfg, fpl.New(), st, sender, log), nil
+	// A league that cannot be built fails the whole cold start rather than
+	// being dropped. A misconfigured league that silently never sends is
+	// indistinguishable from a quiet week, which is the failure this stack is
+	// least able to notice.
+	apps := make([]*app.App, 0, len(cfg.Leagues))
+	for _, league := range cfg.Leagues {
+		sender, err := buildSender(ctx, cfg, league, ssmClient)
+		if err != nil {
+			return nil, fmt.Errorf("league %d: %w", league.ID, err)
+		}
+		log.Info("delivery configured",
+			"league", league.ID, "channel", league.Channel, "dryRun", cfg.DryRun)
+
+		st := store.New(db, cfg.TableName, league.ID)
+		apps = append(apps, app.New(cfg, league, client, st, sender, log))
+	}
+
+	return app.NewFleet(client, apps, log), nil
 }
 
 // buildSender is the only place that knows which transports exist. Everything
-// downstream sees notify.Sender.
-func buildSender(ctx context.Context, cfg *appcfg.Config, awsCfg aws.Config) (notify.Sender, error) {
+// downstream sees notify.Sender. The channel is per league, so one can move to
+// another transport while the rest stay put — and two can name the same
+// parameter to share a webhook.
+func buildSender(
+	ctx context.Context, cfg *appcfg.Config, league appcfg.League, ssmClient *ssm.Client,
+) (notify.Sender, error) {
 	if cfg.DryRun {
 		return notify.Log{}, nil
 	}
 
-	switch cfg.Channel {
+	switch league.Channel {
 	case appcfg.ChannelDiscord:
-		webhookURL, err := secureParam(ctx, ssm.NewFromConfig(awsCfg), cfg.DiscordWebhookParam)
+		webhookURL, err := secureParam(ctx, ssmClient, league.WebhookParam)
 		if err != nil {
 			return nil, err
 		}
 		return notify.NewDiscord(webhookURL), nil
 
 	case appcfg.ChannelSlack:
-		webhookURL, err := secureParam(ctx, ssm.NewFromConfig(awsCfg), cfg.SlackWebhookParam)
+		webhookURL, err := secureParam(ctx, ssmClient, league.WebhookParam)
 		if err != nil {
 			return nil, err
 		}
@@ -91,7 +110,7 @@ func buildSender(ctx context.Context, cfg *appcfg.Config, awsCfg aws.Config) (no
 		return notify.Log{}, nil
 
 	default:
-		return nil, fmt.Errorf("no sender for channel %q", cfg.Channel)
+		return nil, fmt.Errorf("no sender for channel %q", league.Channel)
 	}
 }
 

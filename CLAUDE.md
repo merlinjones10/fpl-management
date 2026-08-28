@@ -29,10 +29,20 @@ costs, why `data_checked`, why the manual copy-paste to WhatsApp) is in
 The tick interval must stay shorter than `reminder_lead_hours`, or a reminder
 can fall between two ticks. `TestScheduledTicksNeverMissAReminder` guards this.
 
+That one Lambda serves **every** league in `LEAGUES`, not one per stack. An
+`app.App` is a single league — its own DynamoDB partition, its own sender, its
+own decision about what is due. An `app.Fleet` (`fleet.go`) is all of them: it
+fetches the gameweek calendar once and hands the same `[]fpl.Event` to each
+`App.Tick`. That shared fetch is the whole argument against a stack per league —
+the bootstrap payload is ~1.6MB and identical whoever is asking.
+
 Dependency flow: `cmd/tick` wires everything → `internal/app` orchestrates →
 `fpl` (read) + `store` (state) + `digest` (render) + `notify` (deliver).
-`internal/app` depends on `FPLClient`, `Store` and `notify.Sender` interfaces
-declared in `app.go`, so all of `Tick` is unit-testable with fakes.
+`internal/app` depends on `StandingsClient`, `Store` and `notify.Sender`
+(declared in `app.go`) plus `EventsClient` (in `fleet.go`), so all of `Tick` is
+unit-testable with fakes. The FPL client split is along the same seam as the
+fetch: `Events` is league-independent and belongs to the Fleet, `Standings` is
+per-league and belongs to the App.
 
 ### Invariants worth preserving
 
@@ -45,6 +55,17 @@ declared in `app.go`, so all of `Tick` is unit-testable with fakes.
 - **Reminder runs before digest and their errors are `errors.Join`ed**, not
   short-circuited — a digest failure must not suppress a time-critical
   reminder. Both can fire in one tick.
+- **Leagues are joined the same way, for the same reason.** `Fleet.Tick`
+  collects each league's error and joins them; one league's broken webhook must
+  not cost another league its message. Each error is wrapped with `league %d`
+  because a single CloudWatch alarm covers the whole fleet and the error text is
+  the only thing that says which league broke. The one exception is the calendar
+  fetch: nothing can be decided without it, so that failure stops the tick
+  outright.
+- **A league that cannot be built fails the whole cold start.** `cmd/tick`
+  returns rather than dropping the league, because a league that silently never
+  sends is indistinguishable from a quiet week — the failure this stack is least
+  able to notice.
 - **Digest waits for `data_checked`, not `finished`** — `finished` means all
   fixtures played, `data_checked` means bonus applied. Using the former reports
   pre-bonus totals.
@@ -82,16 +103,29 @@ sk = SENT#GW#<nn>#DIGEST | SENT#GW#<nn>#REMINDER   idempotency markers
 Gameweeks are zero-padded (`gwKey`) so `sk` range queries sort GW9 before GW10.
 No TTL — an expiring idempotency marker would let an old message resend.
 
+The partition key is what makes leagues independent, and it is why they share
+one table: adding a league needs no migration, and two leagues can never
+contend for a claim. `config.parseLeagues` rejects a duplicate `id` for that
+reason — both entries would target one partition, so one would send and the
+other would silently lose the conditional write.
+
+### Adding a league
+
+One entry in the `leagues` map in `infra/terraform.tfvars`, then `make apply`.
+No table migration — the new league just starts writing its own partition. Two
+leagues may name the same `webhook_param` and share a channel, which is how a
+new league runs into the existing one until its own is ready.
+
 ### Adding a delivery channel
 
 Three edits: a `notify.Sender` implementation, a `config.Channel` const plus
-its required-settings `case` in `config.Load`, and a `case` in
+its required-settings `case` in `parseLeagues` (`config.go`), and a `case` in
 `buildSender` (`cmd/tick/main.go`). Nothing upstream of the interface changes.
-Terraform gates channel resources and IAM statements on `local.use_*` in
-`infra/locals.tf` / `infra/iam.tf`, plus the `notify_channel` validation and
-the `check "channel_settings"` block. A webhook-style channel only needs its
-parameter folded into `local.webhook_param`; the IAM grant follows from
-`local.webhook_param_arns`.
+The channel is per league, so one league can move transport while the others
+stay put. Terraform validates it in the `leagues` variable's `channel` list and
+the `check "channel_settings"` block; a webhook-style channel needs nothing
+further, since `local.webhook_params` collects every league's parameter and the
+IAM grant follows from `local.webhook_param_arns`.
 
 ## Testing
 

@@ -1,5 +1,8 @@
 // Package app holds the decision logic for one tick: given the current FPL
 // state and what we have already sent, work out which messages are due.
+//
+// An App is one league. A Fleet is all of them, sharing a single fetch of the
+// gameweek calendar — see fleet.go.
 package app
 
 import (
@@ -16,8 +19,9 @@ import (
 	"fplbot/internal/store"
 )
 
-type FPLClient interface {
-	Events(ctx context.Context) ([]fpl.Event, error)
+// StandingsClient is the per-league half of the FPL API. The other half, the
+// gameweek calendar, is identical for every league and belongs to the Fleet.
+type StandingsClient interface {
 	Standings(ctx context.Context, leagueID int) (*fpl.StandingsResponse, error)
 }
 
@@ -28,16 +32,27 @@ type Store interface {
 	LatestSnapshotBefore(ctx context.Context, gw int) (*store.Snapshot, error)
 }
 
+// App is one league: its own state partition, its own sender, its own decision
+// about what is due. Several of them run off one Fleet.
 type App struct {
 	cfg    *config.Config
-	fpl    FPLClient
+	league config.League
+	fpl    StandingsClient
 	store  Store
 	sender notify.Sender
 	log    *slog.Logger
 }
 
-func New(cfg *config.Config, client FPLClient, st Store, sender notify.Sender, log *slog.Logger) *App {
-	return &App{cfg: cfg, fpl: client, store: st, sender: sender, log: log}
+func New(
+	cfg *config.Config, league config.League,
+	client StandingsClient, st Store, sender notify.Sender, log *slog.Logger,
+) *App {
+	return &App{
+		cfg: cfg, league: league, fpl: client, store: st, sender: sender,
+		// Attached here rather than by the caller, so every line this league
+		// logs is attributable in a log group shared with the others.
+		log: log.With("league", league.ID),
+	}
 }
 
 type Result struct {
@@ -47,14 +62,13 @@ type Result struct {
 
 // Tick is safe to run on any schedule and as often as you like: every send is
 // gated on a conditional write, so repeats and Lambda retries are no-ops.
-func (a *App) Tick(ctx context.Context, now time.Time) (Result, error) {
+//
+// events is passed in rather than fetched: the calendar is the same bytes for
+// every league, so the Fleet reads it once. See Fleet.Tick.
+func (a *App) Tick(ctx context.Context, now time.Time, events []fpl.Event) (Result, error) {
 	var res Result
 
-	events, err := a.fpl.Events(ctx)
-	if err != nil {
-		return res, fmt.Errorf("fetch events: %w", err)
-	}
-	standings, err := a.fpl.Standings(ctx, a.cfg.LeagueID)
+	standings, err := a.fpl.Standings(ctx, a.league.ID)
 	if err != nil {
 		return res, fmt.Errorf("fetch standings: %w", err)
 	}

@@ -51,16 +51,19 @@ func main() {
 	}
 
 	cfg := &config.Config{
-		LeagueID:     *league,
 		ReminderLead: time.Duration(*lead * float64(time.Hour)),
 		Location:     loc,
 		DryRun:       true,
 	}
 
 	log := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelInfo}))
-	a := app.New(cfg, fpl.New(), memStore{}, notify.Log{}, log)
+	client := fpl.New()
+	a := app.New(cfg, config.League{ID: *league, Channel: config.ChannelLog},
+		client, memStore{}, notify.Log{}, log)
 
-	if _, err := a.Tick(context.Background(), time.Now().UTC()); err != nil {
+	// One league, but through the Fleet, so preview exercises the path the
+	// Lambda actually takes.
+	if _, err := app.NewFleet(client, []*app.App{a}, log).Tick(context.Background(), time.Now().UTC()); err != nil {
 		fmt.Fprintf(os.Stderr, "tick: %v\n", err)
 		os.Exit(1)
 	}

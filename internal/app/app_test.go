@@ -82,6 +82,8 @@ func (f *fakeSender) Send(_ context.Context, m digest.Message) error {
 
 // --- helpers ---
 
+const testLeague = 1058423
+
 func testConfig(t *testing.T) *config.Config {
 	t.Helper()
 	loc, err := time.LoadLocation("Europe/London")
@@ -89,10 +91,13 @@ func testConfig(t *testing.T) *config.Config {
 		t.Fatal(err)
 	}
 	return &config.Config{
-		TableName: "t", LeagueID: 1058423,
-		ReminderLead: 24 * time.Hour, Location: loc,
+		TableName:    "t",
+		ReminderLead: 24 * time.Hour,
+		Location:     loc,
 	}
 }
+
+func testLog() *slog.Logger { return slog.New(slog.NewTextHandler(io.Discard, nil)) }
 
 func ev(id int, name, deadline string, next, checked bool) fpl.Event {
 	return fpl.Event{
@@ -117,9 +122,10 @@ func row(entry int, name string, rank, lastRank, total, eventTotal int) fpl.Stan
 	}
 }
 
-func newApp(t *testing.T, client FPLClient, st Store, sender *fakeSender) *App {
+func newApp(t *testing.T, client StandingsClient, st Store, sender *fakeSender) *App {
 	t.Helper()
-	return New(testConfig(t), client, st, sender, slog.New(slog.NewTextHandler(io.Discard, nil)))
+	return New(testConfig(t), config.League{ID: testLeague, Channel: config.ChannelLog},
+		client, st, sender, testLog())
 }
 
 // --- tests ---
@@ -133,7 +139,7 @@ func TestReminderFiresInsideLeadWindow(t *testing.T) {
 	sender := &fakeSender{}
 	st := newFakeStore()
 
-	res, err := newApp(t, client, st, sender).Tick(context.Background(), now)
+	res, err := newApp(t, client, st, sender).Tick(context.Background(), now, client.events)
 
 	if err != nil {
 		t.Fatalf("Tick: %v", err)
@@ -154,7 +160,7 @@ func TestReminderSilentOutsideLeadWindow(t *testing.T) {
 	}
 	sender := &fakeSender{}
 
-	res, err := newApp(t, client, newFakeStore(), sender).Tick(context.Background(), now)
+	res, err := newApp(t, client, newFakeStore(), sender).Tick(context.Background(), now, client.events)
 
 	if err != nil {
 		t.Fatalf("Tick: %v", err)
@@ -177,7 +183,8 @@ func TestTickIsIdempotent(t *testing.T) {
 	app := newApp(t, client, st, sender)
 
 	for i := 0; i < 5; i++ {
-		if _, err := app.Tick(context.Background(), now.Add(time.Duration(i)*time.Hour)); err != nil {
+		at := now.Add(time.Duration(i) * time.Hour)
+		if _, err := app.Tick(context.Background(), at, client.events); err != nil {
 			t.Fatalf("tick %d: %v", i, err)
 		}
 	}
@@ -223,7 +230,8 @@ func TestScheduledTicksNeverMissAReminder(t *testing.T) {
 					standings: standingsWith(nil, []fpl.NewEntry{{EntryName: ptr("A")}}),
 				}
 				sender := &fakeSender{}
-				app := New(cfg, client, newFakeStore(), sender, slog.New(slog.NewTextHandler(io.Discard, nil)))
+				app := New(cfg, config.League{ID: testLeague, Channel: config.ChannelLog},
+					client, newFakeStore(), sender, testLog())
 
 				// Tick on the real cadence, from well outside the window until
 				// the deadline has passed.
@@ -231,7 +239,7 @@ func TestScheduledTicksNeverMissAReminder(t *testing.T) {
 				start := time.Date(2026, 8, 17, 9, 0, 0, 0, time.UTC)
 				for now := start; !now.After(deadline.Add(sch.interval)); now = now.Add(sch.interval) {
 					before := len(sender.sent)
-					if _, err := app.Tick(context.Background(), now); err != nil {
+					if _, err := app.Tick(context.Background(), now, client.events); err != nil {
 						t.Fatalf("tick at %s: %v", now, err)
 					}
 					if len(sender.sent) > before {
@@ -262,7 +270,7 @@ func TestNoDigestBeforeLeagueStarts(t *testing.T) {
 	}
 	sender := &fakeSender{}
 
-	res, err := newApp(t, client, newFakeStore(), sender).Tick(context.Background(), now)
+	res, err := newApp(t, client, newFakeStore(), sender).Tick(context.Background(), now, client.events)
 
 	if err != nil {
 		t.Fatalf("Tick: %v", err)
@@ -285,7 +293,7 @@ func TestDigestWaitsForDataChecked(t *testing.T) {
 	}
 	sender := &fakeSender{}
 
-	res, err := newApp(t, client, newFakeStore(), sender).Tick(context.Background(), now)
+	res, err := newApp(t, client, newFakeStore(), sender).Tick(context.Background(), now, client.events)
 
 	if err != nil {
 		t.Fatalf("Tick: %v", err)
@@ -308,7 +316,7 @@ func TestDigestSendsAndSnapshots(t *testing.T) {
 	sender := &fakeSender{}
 	st := newFakeStore()
 
-	res, err := newApp(t, client, st, sender).Tick(context.Background(), now)
+	res, err := newApp(t, client, st, sender).Tick(context.Background(), now, client.events)
 
 	if err != nil {
 		t.Fatalf("Tick: %v", err)
@@ -335,7 +343,7 @@ func TestFailedSendReleasesClaimAndSkipsSnapshot(t *testing.T) {
 	sender := &fakeSender{err: errors.New("webhook is down")}
 	st := newFakeStore()
 
-	res, err := newApp(t, client, st, sender).Tick(context.Background(), now)
+	res, err := newApp(t, client, st, sender).Tick(context.Background(), now, client.events)
 
 	if err == nil {
 		t.Fatal("Tick error = nil, want the send failure surfaced")
@@ -351,11 +359,11 @@ func TestFailedSendReleasesClaimAndSkipsSnapshot(t *testing.T) {
 	}
 }
 
-func TestFetchFailureIsSurfaced(t *testing.T) {
+func TestStandingsFailureIsSurfaced(t *testing.T) {
 	client := &fakeFPL{err: errors.New("upstream 503")}
 
 	_, err := newApp(t, client, newFakeStore(), &fakeSender{}).
-		Tick(context.Background(), time.Now())
+		Tick(context.Background(), time.Now(), nil)
 
 	if err == nil {
 		t.Fatal("Tick error = nil, want the fetch failure")

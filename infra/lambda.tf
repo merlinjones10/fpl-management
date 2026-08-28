@@ -27,24 +27,21 @@ resource "aws_lambda_function" "tick" {
   handler       = "bootstrap"
   architectures = ["arm64"]
 
-  # Two sequential FPL calls, one of which is a ~1.6MB payload; the rest is
-  # DynamoDB and one webhook POST. Memory is well above what it needs because
-  # CPU scales with it and JSON decoding is the bottleneck.
+  # One ~1.6MB bootstrap fetch shared by every league, then a standings call,
+  # some DynamoDB and at most two webhook POSTs per league. Memory is well
+  # above what it needs because CPU scales with it and JSON decoding is the
+  # bottleneck; adding a league costs a small fraction of the timeout.
   memory_size = 512
   timeout     = 60
 
   environment {
     variables = {
       TABLE_NAME = aws_dynamodb_table.state.name
-      LEAGUE_ID  = tostring(var.league_id)
 
-      NOTIFY_CHANNEL = var.notify_channel
-
-      # Parameter names, never the webhook URLs — function config is readable
-      # by anyone holding lambda:GetFunction. Only the selected channel's is
-      # read, and only that one is grantable in IAM.
-      DISCORD_WEBHOOK_PARAM = var.discord_webhook_param
-      SLACK_WEBHOOK_PARAM   = var.slack_webhook_param
+      # Every league, with its channel and its parameter *name* — never a
+      # webhook URL. Function config is readable by anyone holding
+      # lambda:GetFunction, and only the named parameters are grantable in IAM.
+      LEAGUES = local.leagues_json
 
       REMINDER_LEAD_HOURS = tostring(var.reminder_lead_hours)
       TIMEZONE            = var.timezone

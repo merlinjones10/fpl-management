@@ -10,50 +10,61 @@ variable "name_prefix" {
   default     = "fpl-league-bot"
 }
 
-variable "league_id" {
-  description = "FPL classic league ID. Found in the league URL on the FPL site."
-  type        = number
-}
-
-variable "notify_channel" {
+variable "leagues" {
   description = <<-EOT
-    Delivery transport: discord, slack or log. Only the selected channel's
-    resources are created and only its settings are required.
+    The leagues to run, keyed by a short name that appears only in plan output.
+    One Lambda serves all of them: the gameweek calendar is the same fetch for
+    every league, and each gets its own DynamoDB partition and its own sender.
+
+      leagues = {
+        a = { id = 1058423, channel = "discord", webhook_param = "/fpl-league-bot/a-discord" }
+        b = { id = 2222222, channel = "slack",   webhook_param = "/fpl-league-bot/b-slack" }
+      }
+
+    id      FPL classic league ID, from the league URL on the FPL site.
+    channel discord, slack or log. Defaults to discord.
+    webhook_param
+            Name of an SSM SecureString holding that channel's webhook URL —
+            never the URL itself, which embeds its token and must not reach
+            Terraform state. Create the webhook (Discord: Server Settings >
+            Integrations > Webhooks; Slack: a Slack app with Incoming Webhooks
+            enabled), then store it out of band:
+
+              aws ssm put-parameter --name /fpl-league-bot/a-discord \
+                --type SecureString --value '<WEBHOOK URL>'
+
+    Two leagues may name the same parameter and share a channel — which is how
+    a new league runs into the existing one until its own is ready. The log
+    channel needs no parameter and is granted nothing.
   EOT
-  type        = string
-  default     = "discord"
+
+  type = map(object({
+    id            = number
+    channel       = optional(string, "discord")
+    webhook_param = optional(string, "")
+  }))
 
   validation {
-    condition     = contains(["discord", "slack", "log"], var.notify_channel)
-    error_message = "notify_channel must be one of: discord, slack, log."
+    condition     = length(var.leagues) > 0
+    error_message = "At least one league is required."
   }
-}
 
-variable "discord_webhook_param" {
-  description = <<-EOT
-    Name of an SSM SecureString holding the channel's webhook URL — not the URL
-    itself, which embeds the webhook token and must never reach Terraform state.
-    Create the webhook under Server Settings > Integrations > Webhooks, then:
+  validation {
+    condition     = alltrue([for l in var.leagues : l.id > 0])
+    error_message = "Each league needs a positive id, taken from its URL on the FPL site."
+  }
 
-      aws ssm put-parameter --name /fpl-league-bot/discord-webhook \
-        --type SecureString --value 'https://discord.com/api/webhooks/<id>/<token>'
-  EOT
-  type        = string
-  default     = "/fpl-league-bot/discord-webhook"
-}
+  validation {
+    condition     = alltrue([for l in var.leagues : contains(["discord", "slack", "log"], l.channel)])
+    error_message = "Each league's channel must be one of: discord, slack, log."
+  }
 
-variable "slack_webhook_param" {
-  description = <<-EOT
-    Name of an SSM SecureString holding the channel's incoming webhook URL — not
-    the URL itself, which embeds the webhook token and must never reach
-    Terraform state. Create a Slack app, enable Incoming Webhooks, add one to
-    the destination channel, then:
-
-      aws ssm put-parameter --name /fpl-league-bot/slack-webhook \
-        --type SecureString --value 'https://hooks.slack.com/services/<T>/<B>/<token>'
-  EOT
-  type        = string
-  default     = "/fpl-league-bot/slack-webhook"
+  validation {
+    # Two entries for one league would both claim the same partition: one
+    # sends, the other silently loses and looks like a quiet week.
+    condition     = length(distinct([for l in var.leagues : l.id])) == length(var.leagues)
+    error_message = "Each league id must appear only once."
+  }
 }
 
 variable "reminder_lead_hours" {

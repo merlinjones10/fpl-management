@@ -15,11 +15,12 @@ output "schedule" {
   value = aws_scheduler_schedule.tick.schedule_expression
 }
 
-output "notify_channel" {
-  value = var.notify_channel
+output "leagues" {
+  description = "Each league and the transport its messages go out on."
+  value       = { for k, l in var.leagues : k => "${l.id} → ${l.channel}" }
 }
 
-output "discord_webhook_param" {
-  description = "Create this SecureString before the first invocation; the Lambda reads it at cold start."
-  value       = local.use_discord ? var.discord_webhook_param : ""
+output "webhook_params" {
+  description = "Create these SecureStrings before the first invocation; the Lambda reads them at cold start."
+  value       = local.webhook_params
 }

@@ -1,8 +1,8 @@
 # fpl-league-bot
 
-Weekly standings digest and gameweek deadline reminders for a Fantasy Premier
-League classic league. Go on Lambda, OpenTofu, delivered to a Discord channel
-formatted for pasting straight into a WhatsApp group.
+Weekly standings digest and gameweek deadline reminders for Fantasy Premier
+League classic leagues. Go on Lambda, OpenTofu, delivered to a Discord or Slack
+channel formatted for pasting straight into a WhatsApp group.
 
 ## How it works
 
@@ -21,6 +21,29 @@ digest stays silent until GW1 lands.
 
 Every send is gated on a conditional DynamoDB write, so repeat ticks, Lambda
 retries and manual invocations are all no-ops once a message has gone.
+
+### Why one Lambda for every league, not a stack each
+
+The gameweek calendar is the same ~1.6MB response whoever is asking, so a stack
+per league would fetch the identical bytes *n* times a tick off an undocumented
+free API — and duplicate the table, schedule, alarm, IAM roles and deploy around
+it. None of that buys anything: the table is keyed `LEAGUE#<id>`, so the leagues
+are already isolated where it matters.
+
+So `app.Fleet` reads the calendar once and hands it to one `app.App` per league.
+Everything genuinely per-league stays in the App: its own standings call, its
+own state partition, its own sender. Adding a league is one entry in the
+`leagues` map and an apply — no migration.
+
+Leagues do not share a fate. `Fleet.Tick` joins their errors rather than
+short-circuiting, so a broken webhook on one league still lets the others send,
+and each error names the league because a single alarm covers them all. The one
+exception is the calendar fetch: nothing can be decided without it, so that
+failure stops the tick.
+
+A separate stack per league would be right if they lived in different AWS
+accounts, had different owners, or needed different regions. None of that
+applies here.
 
 ### Why a dumb schedule rather than a weekly cron
 
@@ -80,7 +103,7 @@ late joiner, not a 0-place move.
 cmd/tick        Lambda entry point
 cmd/preview     renders the current messages locally, sends nothing
 internal/fpl    API client and types
-internal/app    the "what is due" decision logic
+internal/app    the "what is due" decision logic — App is one league, Fleet is all of them
 internal/digest movement calculation and message rendering
 internal/store  DynamoDB single-table state
 internal/notify delivery — Discord, Slack or log, behind one Sender interface
@@ -129,11 +152,25 @@ Discord.
 ### Deploy
 
 ```bash
-cp infra/terraform.tfvars.example infra/terraform.tfvars   # fill in league id
+cp infra/terraform.tfvars.example infra/terraform.tfvars   # fill in the leagues
 make apply
 make invoke   # run one tick immediately
 make logs     # tail
 ```
+
+Each league is one entry in the `leagues` map:
+
+```hcl
+leagues = {
+  a = { id = 1058423, channel = "discord", webhook_param = "/fpl-league-bot/a-discord" }
+  b = { id = 2222222, channel = "slack",   webhook_param = "/fpl-league-bot/b-slack" }
+}
+```
+
+Two leagues may name the same `webhook_param` and share a channel — both digests
+then land in the one place, each headed by its own league name. That is the
+easy way to bring a league up before its own channel exists; moving it later is
+two lines and an apply.
 
 ## Delivery
 
@@ -141,15 +178,15 @@ make logs     # tail
 `cmd/tick` is the only place that knows which transports exist; everything
 upstream sees the interface. Adding one means a file and a `case`.
 
-| `notify_channel` | Notes |
+| `channel` | Notes |
 | --- | --- |
 | `discord` | Default. Incoming webhook to one channel. URL in SSM. |
 | `slack` | Incoming webhook to one channel. URL in SSM. |
 | `log` | Prints instead of sending. What `make preview` uses. |
 
-Only the selected channel's resources are created and only its settings are
-required, so switching does not mean carrying config for the transport you
-dropped.
+The channel is set per league, and only that channel's settings are required —
+so one league can move transport without the others carrying config for it, and
+a league on `log` is granted no SSM access at all.
 
 ### Discord
 

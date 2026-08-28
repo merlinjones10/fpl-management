@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"strings"
 	"time"
 )
 
@@ -81,9 +82,30 @@ func getJSON[T validator](ctx context.Context, c *Client, path string, out *T) e
 type httpError struct {
 	status int
 	path   string
+	ray    string // Cloudflare's Cf-Ray, set when the refusal came from the CDN
+	body   string // one-line, truncated response body
 }
 
-func (e *httpError) Error() string { return fmt.Sprintf("fpl: %s returned %d", e.path, e.status) }
+func (e *httpError) Error() string {
+	msg := fmt.Sprintf("fpl: %s returned %d", e.path, e.status)
+	if e.ray != "" {
+		msg += " (cf-ray " + e.ray + ")"
+	}
+	if e.body != "" {
+		msg += ": " + e.body
+	}
+	return msg
+}
+
+// snippet flattens a body to one truncated line. A CDN block page is multi-line
+// HTML, and a CloudWatch log entry per line is unreadable.
+func snippet(b []byte) string {
+	s := strings.Join(strings.Fields(string(b)), " ")
+	if r := []rune(s); len(r) > 200 {
+		s = string(r[:200]) + "…"
+	}
+	return s
+}
 
 func (c *Client) do(ctx context.Context, path string, out any) error {
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, c.baseURL+path, nil)
@@ -103,8 +125,13 @@ func (c *Client) do(ctx context.Context, path string, out any) error {
 		return fmt.Errorf("%w: %s", ErrNotFound, path)
 	}
 	if res.StatusCode != http.StatusOK {
-		io.Copy(io.Discard, io.LimitReader(res.Body, 4<<10))
-		return &httpError{status: res.StatusCode, path: path}
+		b, _ := io.ReadAll(io.LimitReader(res.Body, 4<<10))
+		return &httpError{
+			status: res.StatusCode,
+			path:   path,
+			ray:    res.Header.Get("Cf-Ray"),
+			body:   snippet(b),
+		}
 	}
 
 	if err := json.NewDecoder(res.Body).Decode(out); err != nil {

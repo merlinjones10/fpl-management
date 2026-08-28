@@ -66,8 +66,8 @@ func TestRenderDigest(t *testing.T) {
 		"Three-o Walcott — 70 pts",
 		"*Wooden spoon 🥄*",
 		"The Bees — 40 pts",
-		"Average 51",
-		"overall best 112",
+		"World average 51",
+		"world best 112",
 	)
 	if !strings.Contains(msg.Subject, "Gameweek 3 results") {
 		t.Errorf("subject = %q", msg.Subject)

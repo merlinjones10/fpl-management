@@ -83,9 +83,9 @@ func writeScorers(b *strings.Builder, singular, plural string, s *Scorers) {
 }
 
 func digestFooter(in DigestInput) string {
-	parts := []string{fmt.Sprintf("Average %d", in.Event.AverageEntryScore)}
+	parts := []string{fmt.Sprintf("World average %d", in.Event.AverageEntryScore)}
 	if in.Event.HighestScore != nil {
-		parts = append(parts, fmt.Sprintf("overall best %d", *in.Event.HighestScore))
+		parts = append(parts, fmt.Sprintf("world best %d", *in.Event.HighestScore))
 	}
 	switch {
 	case in.Movement.Baseline == BaselineSnapshot && in.Movement.BaselineGW > 0:

@@ -1,7 +1,6 @@
 package notify
 
 import (
-	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
@@ -89,28 +88,5 @@ func (d *Discord) sendOne(ctx context.Context, content string) error {
 	if err != nil {
 		return err
 	}
-
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, d.webhookURL, bytes.NewReader(payload))
-	if err != nil {
-		return scrubURL(err)
-	}
-	req.Header.Set("Content-Type", "application/json")
-
-	res, err := d.http.Do(req)
-	if err != nil {
-		return scrubURL(err)
-	}
-	defer res.Body.Close()
-
-	// A successful webhook post is 204 with an empty body, and errors carry a
-	// 4xx, so the status code alone decides success.
-	if res.StatusCode < 200 || res.StatusCode > 299 {
-		buf := new(bytes.Buffer)
-		if _, err := buf.ReadFrom(res.Body); err != nil {
-			return fmt.Errorf("status %d, unreadable response: %w", res.StatusCode, err)
-		}
-		// The URL is a secret; only the response body goes into the error.
-		return fmt.Errorf("status %d: %s", res.StatusCode, truncate(strings.TrimSpace(buf.String()), 200))
-	}
-	return nil
+	return postWebhook(ctx, d.http, d.webhookURL, payload)
 }

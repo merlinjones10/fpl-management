@@ -188,6 +188,13 @@ The channel is set per league, and only that channel's settings are required —
 so one league can move transport without the others carrying config for it, and
 a league on `log` is granted no SSM access at all.
 
+Both webhook transports retry a `429` and nothing else. Leagues sharing a
+webhook stack their posts into one rate-limit bucket, so a rate limit is an
+expected answer rather than a failure — and left unhandled it would release the
+claim and have the next tick re-post the parts that already landed. A `5xx` is
+*not* retried: it may mean the far end took the message and then failed to say
+so, and posting again would duplicate it.
+
 ### Discord
 
 **The body is posted raw, carrying its WhatsApp markup.** Discord reads

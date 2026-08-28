@@ -86,6 +86,14 @@ per-league and belongs to the App.
   duplicate the body's own heading). The body *is* HTML-escaped (`&`, `<`, `>`)
   because team names are user-supplied, and escaped **before** `splitMessage`,
   since the limit applies to what is posted.
+- **Webhook posts retry a 429 and nothing else** (`notify/webhook.go`). A rate
+  limit is a guaranteed rejection, so re-posting cannot duplicate; a 5xx may
+  mean the far end accepted the message and then failed to say so, and retrying
+  would post it twice. This exists because leagues can share a webhook: their
+  posts stack into one bucket, and without the retry a 429 reads as a hard
+  failure, `app.send` releases the claim, and the next tick re-sends the parts
+  that already arrived. A long `Retry-After` is refused rather than waited out —
+  every league shares one 60s Lambda timeout.
 - **Secrets stay out of Terraform state and function config.** The Discord
   webhook URL lives in an SSM SecureString created out of band; only the
   parameter *name* is in the Lambda environment, read at cold start by

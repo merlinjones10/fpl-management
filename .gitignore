@@ -1,0 +1,14 @@
+dist/
+*.zip
+
+# Local secrets for manual sends (Discord webhook URL). Never committed.
+.env.local
+
+# OpenTofu / Terraform
+# The provider lock file is committed on purpose — it pins what actually applied.
+infra/.terraform/
+infra/*.tfstate
+infra/*.tfstate.*
+infra/*.tfvars
+!infra/*.tfvars.example
+crash.log

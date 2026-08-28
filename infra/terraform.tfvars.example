@@ -1,0 +1,19 @@
+# Copy to terraform.tfvars and fill in. That file is gitignored.
+
+league_id = 1058423
+
+# --- Discord (default) ----------------------------------------------------
+# 1. Server Settings > Integrations > Webhooks > New Webhook, pick the channel,
+#    Copy Webhook URL.
+# 2. Store it yourself so it never enters Terraform state:
+#      aws ssm put-parameter --name /fpl-league-bot/discord-webhook \
+#        --type SecureString --value '<WEBHOOK URL>'
+# Copy a message out with the message menu's "Copy Text" — that returns the raw
+# source, so *bold* survives the paste into WhatsApp. Dragging a selection does
+# not: Discord copies the rendered text and drops the markup.
+notify_channel = "discord"
+# discord_webhook_param = "/fpl-league-bot/discord-webhook"
+
+# --- Optional -------------------------------------------------------------
+# reminder_lead_hours = 48
+# schedule_expression = "cron(0 9,21 * * ? *)"   # 09:00 and 21:00, in var.timezone

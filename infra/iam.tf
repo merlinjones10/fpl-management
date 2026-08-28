@@ -28,17 +28,17 @@ data "aws_iam_policy_document" "lambda" {
   }
 
   dynamic "statement" {
-    for_each = local.use_discord ? [1] : []
+    for_each = local.webhook_param_arns
 
     content {
       sid       = "ReadWebhookURL"
       actions   = ["ssm:GetParameter"]
-      resources = [local.discord_webhook_param_arn]
+      resources = [statement.value]
     }
   }
 
   dynamic "statement" {
-    for_each = local.use_discord ? [1] : []
+    for_each = local.webhook_param_arns
 
     content {
       sid     = "DecryptWebhookURL"

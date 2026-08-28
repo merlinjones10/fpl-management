@@ -80,6 +80,13 @@ func buildSender(ctx context.Context, cfg *appcfg.Config, awsCfg aws.Config) (no
 		}
 		return notify.NewDiscord(webhookURL), nil
 
+	case appcfg.ChannelSlack:
+		webhookURL, err := secureParam(ctx, ssm.NewFromConfig(awsCfg), cfg.SlackWebhookParam)
+		if err != nil {
+			return nil, err
+		}
+		return notify.NewSlack(webhookURL), nil
+
 	case appcfg.ChannelLog:
 		return notify.Log{}, nil
 

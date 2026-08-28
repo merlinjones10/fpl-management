@@ -59,6 +59,12 @@ declared in `app.go`, so all of `Tick` is unit-testable with fakes.
   wrapper was tried and rejected as harder to read. Every post also sets
   `SUPPRESS_EMBEDS` (a copied link preview) and empty `allowed_mentions.parse`
   (a team named `@everyone`).
+- **Slack is the opposite case and leaves mrkdwn on.** That channel is read in
+  Slack, not copied on, and Slack's `*bold*`/`_italic_` already match the
+  rendered markup — so no translation, and no Block Kit (a `header` would
+  duplicate the body's own heading). The body *is* HTML-escaped (`&`, `<`, `>`)
+  because team names are user-supplied, and escaped **before** `splitMessage`,
+  since the limit applies to what is posted.
 - **Secrets stay out of Terraform state and function config.** The Discord
   webhook URL lives in an SSM SecureString created out of band; only the
   parameter *name* is in the Lambda environment, read at cold start by
@@ -83,7 +89,9 @@ its required-settings `case` in `config.Load`, and a `case` in
 `buildSender` (`cmd/tick/main.go`). Nothing upstream of the interface changes.
 Terraform gates channel resources and IAM statements on `local.use_*` in
 `infra/locals.tf` / `infra/iam.tf`, plus the `notify_channel` validation and
-the `check "channel_settings"` block.
+the `check "channel_settings"` block. A webhook-style channel only needs its
+parameter folded into `local.webhook_param`; the IAM grant follows from
+`local.webhook_param_arns`.
 
 ## Testing
 

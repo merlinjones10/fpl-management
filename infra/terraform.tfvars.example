@@ -14,6 +14,17 @@ league_id = 1058423
 notify_channel = "discord"
 # discord_webhook_param = "/fpl-league-bot/discord-webhook"
 
+# --- Slack ------------------------------------------------------------------
+# 1. api.slack.com/apps > Create New App > Incoming Webhooks > Add New Webhook
+#    to Workspace, pick the channel.
+# 2. Store it yourself so it never enters Terraform state:
+#      aws ssm put-parameter --name /fpl-league-bot/slack-webhook \
+#        --type SecureString --value '<WEBHOOK URL>'
+# This channel is read in Slack, not copied on into WhatsApp, so mrkdwn is left
+# on and the bodies render properly as-is.
+# notify_channel      = "slack"
+# slack_webhook_param = "/fpl-league-bot/slack-webhook"
+
 # --- Optional -------------------------------------------------------------
 # reminder_lead_hours = 48
 # schedule_expression = "cron(0 9,21 * * ? *)"   # 09:00 and 21:00, in var.timezone

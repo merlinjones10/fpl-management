@@ -83,7 +83,7 @@ internal/fpl    API client and types
 internal/app    the "what is due" decision logic
 internal/digest movement calculation and message rendering
 internal/store  DynamoDB single-table state
-internal/notify delivery — Discord or log, behind one Sender interface
+internal/notify delivery — Discord, Slack or log, behind one Sender interface
 infra/          OpenTofu stack
 testdata/       captured live responses, refreshed by scripts/capture-fixtures.sh
 ```
@@ -111,6 +111,21 @@ the function's environment. The URL embeds the webhook token, so anyone holding
 it can post to the channel — rotate by deleting the webhook and creating
 another.
 
+### Slack
+
+1. api.slack.com/apps > Create New App > Incoming Webhooks > Add New Webhook to
+   Workspace, and pick the channel.
+2. Store the URL the same way:
+
+```bash
+aws ssm put-parameter --name /fpl-league-bot/slack-webhook \
+  --type SecureString --value '<WEBHOOK URL>'
+```
+
+An incoming webhook, not a bot token: one secret, one channel, no OAuth scopes
+to keep in step. The same cold-start read and the same rotation story as
+Discord.
+
 ### Deploy
 
 ```bash
@@ -124,16 +139,19 @@ make logs     # tail
 
 `notify.Sender` is one method — `Send(ctx, Message)`. `buildSender` in
 `cmd/tick` is the only place that knows which transports exist; everything
-upstream sees the interface. Adding Slack means one file and one `case`.
+upstream sees the interface. Adding one means a file and a `case`.
 
 | `notify_channel` | Notes |
 | --- | --- |
 | `discord` | Default. Incoming webhook to one channel. URL in SSM. |
+| `slack` | Incoming webhook to one channel. URL in SSM. |
 | `log` | Prints instead of sending. What `make preview` uses. |
 
 Only the selected channel's resources are created and only its settings are
 required, so switching does not mean carrying config for the transport you
 dropped.
+
+### Discord
 
 **The body is posted raw, carrying its WhatsApp markup.** Discord reads
 `*bold*` as italic, so the channel renders it slightly wrong — that is
@@ -147,6 +165,25 @@ a preview card that gets copied along with the text, and sends
 `allowed_mentions.parse: []`, because a manager can name their team
 `@everyone`. Messages over the 2000-character limit are split on line
 boundaries so a table never breaks mid-row.
+
+### Slack
+
+**mrkdwn is left on.** This channel is read in Slack rather than copied on into
+WhatsApp, so there is nothing to protect: Slack's `*bold*`, `_italic_` and
+bare-URL autolinking already match what `digest` renders, and the bodies need
+no translation. Block Kit was considered and skipped — a `header` block would
+duplicate the heading the body already opens with, and a `context` footer would
+mean the sender parsing the body back apart. Both trade a second renderer for
+larger type on one line.
+
+The body is HTML-escaped first: `&`, `<` and `>` are reserved in Slack message
+text, and team names come from managers, so "Salah & Co" would otherwise render
+wrong and `<Wildcard>` would vanish. Escaping `<` is also why no
+`allowed_mentions` equivalent is needed — a literal `@everyone` is inert in
+Slack, and no team name can spell the `<!everyone>` form that is not. Escaping
+happens *before* the split, since the 3000-rune limit applies to what is
+actually posted and an escaped `&` costs five runes. Every post sends
+`unfurl_links` and `unfurl_media` false, the `SUPPRESS_EMBEDS` equivalent.
 
 ## The API
 

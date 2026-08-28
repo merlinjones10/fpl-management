@@ -4,10 +4,8 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
-	"errors"
 	"fmt"
 	"net/http"
-	"net/url"
 	"strings"
 	"time"
 
@@ -115,14 +113,4 @@ func (d *Discord) sendOne(ctx context.Context, content string) error {
 		return fmt.Errorf("status %d: %s", res.StatusCode, truncate(strings.TrimSpace(buf.String()), 200))
 	}
 	return nil
-}
-
-// scrubURL drops the URL that net/http records in *url.Error. The webhook token
-// sits in that URL, and the error text ends up in CloudWatch.
-func scrubURL(err error) error {
-	var urlErr *url.Error
-	if errors.As(err, &urlErr) {
-		return fmt.Errorf("%s to webhook: %w", urlErr.Op, urlErr.Err)
-	}
-	return err
 }

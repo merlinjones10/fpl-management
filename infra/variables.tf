@@ -17,15 +17,15 @@ variable "league_id" {
 
 variable "notify_channel" {
   description = <<-EOT
-    Delivery transport: discord or log. Only the selected channel's resources
-    are created and only its settings are required.
+    Delivery transport: discord, slack or log. Only the selected channel's
+    resources are created and only its settings are required.
   EOT
   type        = string
   default     = "discord"
 
   validation {
-    condition     = contains(["discord", "log"], var.notify_channel)
-    error_message = "notify_channel must be one of: discord, log."
+    condition     = contains(["discord", "slack", "log"], var.notify_channel)
+    error_message = "notify_channel must be one of: discord, slack, log."
   }
 }
 
@@ -40,6 +40,20 @@ variable "discord_webhook_param" {
   EOT
   type        = string
   default     = "/fpl-league-bot/discord-webhook"
+}
+
+variable "slack_webhook_param" {
+  description = <<-EOT
+    Name of an SSM SecureString holding the channel's incoming webhook URL — not
+    the URL itself, which embeds the webhook token and must never reach
+    Terraform state. Create a Slack app, enable Incoming Webhooks, add one to
+    the destination channel, then:
+
+      aws ssm put-parameter --name /fpl-league-bot/slack-webhook \
+        --type SecureString --value 'https://hooks.slack.com/services/<T>/<B>/<token>'
+  EOT
+  type        = string
+  default     = "/fpl-league-bot/slack-webhook"
 }
 
 variable "reminder_lead_hours" {

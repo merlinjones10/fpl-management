@@ -17,7 +17,7 @@ func setEnv(t *testing.T, kv map[string]string) {
 	// Clear everything the loader reads, so one case cannot leak into the next.
 	for _, k := range []string{
 		"TABLE_NAME", "LEAGUE_ID", "NOTIFY_CHANNEL", "DISCORD_WEBHOOK_PARAM",
-		"REMINDER_LEAD_HOURS", "TIMEZONE", "DRY_RUN",
+		"SLACK_WEBHOOK_PARAM", "REMINDER_LEAD_HOURS", "TIMEZONE", "DRY_RUN",
 	} {
 		t.Setenv(k, "")
 	}
@@ -56,6 +56,20 @@ func TestLoadRejectsIncompleteChannel(t *testing.T) {
 			"DISCORD_WEBHOOK_PARAM",
 		},
 		{
+			"slack without webhook param",
+			map[string]string{"NOTIFY_CHANNEL": "slack"},
+			"SLACK_WEBHOOK_PARAM",
+		},
+		{
+			// The discord settings are no help to the slack transport.
+			"slack carrying only the discord param",
+			map[string]string{
+				"NOTIFY_CHANNEL":        "slack",
+				"DISCORD_WEBHOOK_PARAM": "/fpl/discord-webhook",
+			},
+			"SLACK_WEBHOOK_PARAM",
+		},
+		{
 			"unknown channel",
 			map[string]string{"NOTIFY_CHANNEL": "carrier-pigeon"},
 			"not one of",
@@ -75,6 +89,24 @@ func TestLoadRejectsIncompleteChannel(t *testing.T) {
 				t.Errorf("error = %v, want mention of %q", err, tc.want)
 			}
 		})
+	}
+}
+
+func TestLoadAcceptsSlack(t *testing.T) {
+	setEnv(t, map[string]string{
+		"NOTIFY_CHANNEL":      "slack",
+		"SLACK_WEBHOOK_PARAM": "/fpl/slack-webhook",
+	})
+
+	cfg, err := Load()
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	if cfg.Channel != ChannelSlack {
+		t.Errorf("Channel = %q, want slack", cfg.Channel)
+	}
+	if cfg.SlackWebhookParam != "/fpl/slack-webhook" {
+		t.Errorf("SlackWebhookParam = %q", cfg.SlackWebhookParam)
 	}
 }
 

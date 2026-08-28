@@ -40,9 +40,11 @@ resource "aws_lambda_function" "tick" {
 
       NOTIFY_CHANNEL = var.notify_channel
 
-      # The parameter name, never the webhook URL — function config is readable
-      # by anyone holding lambda:GetFunction.
+      # Parameter names, never the webhook URLs — function config is readable
+      # by anyone holding lambda:GetFunction. Only the selected channel's is
+      # read, and only that one is grantable in IAM.
       DISCORD_WEBHOOK_PARAM = var.discord_webhook_param
+      SLACK_WEBHOOK_PARAM   = var.slack_webhook_param
 
       REMINDER_LEAD_HOURS = tostring(var.reminder_lead_hours)
       TIMEZONE            = var.timezone

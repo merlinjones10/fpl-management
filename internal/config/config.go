@@ -14,6 +14,7 @@ type Channel string
 
 const (
 	ChannelDiscord Channel = "discord"
+	ChannelSlack   Channel = "slack"
 	ChannelLog     Channel = "log"
 )
 
@@ -23,11 +24,11 @@ type Config struct {
 
 	Channel Channel
 
-	// DiscordWebhookParam is an SSM parameter name, not the webhook URL itself.
-	// The URL embeds the webhook token, so it is fetched at cold start and never
-	// sits in the function config, where anyone with lambda:GetFunction could
-	// read it.
+	// These are SSM parameter names, not the webhook URLs themselves. A URL
+	// embeds its webhook token, so it is fetched at cold start and never sits in
+	// the function config, where anyone with lambda:GetFunction could read it.
 	DiscordWebhookParam string
+	SlackWebhookParam   string
 
 	// ReminderLead is how far ahead of a deadline the reminder fires.
 	ReminderLead time.Duration
@@ -40,6 +41,7 @@ func Load() (*Config, error) {
 	c := &Config{
 		TableName:           os.Getenv("TABLE_NAME"),
 		DiscordWebhookParam: os.Getenv("DISCORD_WEBHOOK_PARAM"),
+		SlackWebhookParam:   os.Getenv("SLACK_WEBHOOK_PARAM"),
 		DryRun:              os.Getenv("DRY_RUN") == "true",
 	}
 	var errs []string
@@ -66,10 +68,14 @@ func Load() (*Config, error) {
 		if c.DiscordWebhookParam == "" {
 			errs = append(errs, "DISCORD_WEBHOOK_PARAM is required for the discord channel")
 		}
+	case ChannelSlack:
+		if c.SlackWebhookParam == "" {
+			errs = append(errs, "SLACK_WEBHOOK_PARAM is required for the slack channel")
+		}
 	case ChannelLog:
 		// Nothing to configure.
 	default:
-		errs = append(errs, fmt.Sprintf("NOTIFY_CHANNEL %q is not one of discord, log", c.Channel))
+		errs = append(errs, fmt.Sprintf("NOTIFY_CHANNEL %q is not one of discord, slack, log", c.Channel))
 	}
 
 	hours := 48.0

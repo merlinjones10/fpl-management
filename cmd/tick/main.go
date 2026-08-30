@@ -56,7 +56,7 @@ func build(ctx context.Context, log *slog.Logger) (*app.Fleet, error) {
 		return nil, err
 	}
 
-	client := fpl.New()
+	client := fpl.New(fpl.WithLogger(log))
 	db := dynamodb.NewFromConfig(awsCfg)
 	ssmClient := ssm.NewFromConfig(awsCfg)
 

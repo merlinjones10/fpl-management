@@ -6,7 +6,7 @@ channel formatted for pasting straight into a WhatsApp group.
 
 ## How it works
 
-One Lambda (`cmd/tick`), invoked at 09:00 and 21:00 (Europe/London) by
+One Lambda (`cmd/tick`), invoked hourly (Europe/London) by
 EventBridge Scheduler. Each run reads the live FPL state and decides for itself
 whether anything is due:
 
@@ -58,37 +58,32 @@ The end of a gameweek has no timestamp at all. FPL signals it with `finished`
 final). The digest waits for `data_checked`, or it would report pre-bonus
 totals.
 
-### Why twice daily
+### Why hourly
 
 `data_checked` flips at whatever hour FPL finishes applying bonus, which can be
-the middle of the night. Ticking at 09:00 and 21:00 means the digest lands at an
-hour it is plausibly going to be read and pasted into the group, and costs two
-bootstrap fetches a day (~1.6MB each) off an undocumented free API instead of
-24.
+the middle of the night. An hourly tick gets the digest out within an hour of
+that transition and gives an intermittent FPL CDN refusal another independent
+chance to recover. Every message is protected by a DynamoDB idempotency key, so
+the other ticks are harmless no-ops. This costs 24 bootstrap fetches a day
+(~1.6MB each) against an undocumented free API.
 
-What a coarse tick costs is precision, not correctness:
+What an hourly tick costs is API traffic, not correctness:
 
-- **Reminder lead becomes 36–48h** instead of ~48h. The 48h window is wider than
-  the 12h tick interval, so it always contains a tick and the reminder is never
-  missed — it just fires a little later than nominal. Generally the lead lands
-  between `reminder_lead_hours - interval` and `reminder_lead_hours`, which is
-  why the interval must stay shorter than the lead.
-- **A failed tick costs 12h.** After the scheduler's two retries, the next
-  attempt is the other end of the day rather than in an hour.
-- **In a compressed week you could get one digest instead of two.** If two
-  gameweeks reach `data_checked` inside the same 12h, `latestChecked` reports
-  the newer one and the older is skipped — deliberately, because `standings` is
-  fetched live, so rendering a skipped gameweek would put today's table under
-  last week's heading. Nothing is lost: the digest still shows the correct
-  current table, and its footer reads "movement vs GW*n*" against whichever
-  snapshot is the real baseline, so the wider span is self-labelling.
+- **Reminder lead becomes 47–48h** instead of ~48h. The 48h window is wider than
+  the one-hour tick interval, so it always contains a tick and the reminder is
+  never missed — it just fires a little later than nominal.
+- **A failed tick costs at most an hour.** EventBridge still makes its two
+  retries, and the next scheduled attempt follows within an hour.
+- **Compressed gameweeks are less likely to collapse into one digest.** If two
+  gameweeks reach `data_checked` between ticks, `latestChecked` still reports
+  only the newer one, because standings are fetched live and must not be placed
+  under an older gameweek heading.
 
 Two deadlines can never fall inside one tick interval — the minimum gap between
 FPL deadlines is two days — so `nextDeadline` cannot skip a gameweek.
 
-The trade against a single 09:00 tick is that a digest can now arrive at 21:00
-instead of always in the morning. That was accepted for the tighter reminder
-lead and the faster recovery from a failed tick.
+The trade is extra reads from an unofficial API. The hourly interval is kept
+well below the reminder lead, so a reminder cannot fall between ticks.
 
 ### Movement
 
@@ -237,6 +232,13 @@ readable by ID — membership is not checked.
 Requests send a browser `User-Agent`; the default Go one gets 403'd
 intermittently. The client retries 5xx and 429 with backoff, because the API
 goes read-only during price changes (~02:00 UK) and gameweek processing.
+
+Every `/bootstrap-static/` fetch also emits a CloudWatch Embedded Metric Format
+event in the `FPLLeagueBot` namespace. `BootstrapFetches` is tagged with its
+outcome and final HTTP status, and `BootstrapFetchDuration` records its total
+duration. The matching JSON log event (`msg="fpl bootstrap fetch"`) carries the
+exact timestamp and any failure text, making it possible to compare successful
+and failed hours in Logs Insights.
 
 Fields gain and disappear between seasons, so the flags the app branches on are
 pointers and `Validate` rejects a response that omits them — a schema change

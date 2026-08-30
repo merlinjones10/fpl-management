@@ -90,17 +90,17 @@ variable "schedule_expression" {
     anything is due, so this only bounds how late a message can be — not when
     one is sent.
 
-    09:00 and 21:00 rather than hourly: those are the hours the digest actually
-    gets pasted into the group, and it is two bootstrap fetches a day off an
-    undocumented API instead of 24. The cost is precision, not correctness —
-    see "Why twice daily" in README.md before changing it.
+    Hourly gives a failed fetch another independent chance within an hour.
+    Sends are idempotent, so ticks that find nothing due are harmless. It does
+    make 24 bootstrap fetches a day against an undocumented API — see "Why
+    hourly" in README.md before changing it.
 
     Whatever you set, keep the interval shorter than reminder_lead_hours. The
     lead window has to be wider than the gap between ticks or a reminder can
     fall between two of them.
   EOT
   type        = string
-  default     = "cron(0 9,21 * * ? *)"
+  default     = "cron(0 * * * ? *)"
 }
 
 variable "log_retention_days" {

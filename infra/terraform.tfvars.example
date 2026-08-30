@@ -37,4 +37,4 @@ leagues = {
 
 # --- Optional -------------------------------------------------------------
 # reminder_lead_hours = 48
-# schedule_expression = "cron(0 9,21 * * ? *)"   # 09:00 and 21:00, in var.timezone
+# schedule_expression = "cron(0 * * * ? *)"     # hourly, in var.timezone (the default)

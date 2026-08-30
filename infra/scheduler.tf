@@ -3,8 +3,8 @@
 # deliberately dumb: tick on a fixed clock, and let the Lambda read the real
 # deadlines and decide. The interval only bounds how late a message can be.
 #
-# schedule_expression_timezone means the 09:00/21:00 default tracks BST rather
-# than drifting an hour twice a year.
+# schedule_expression_timezone keeps any configured local clock times aligned
+# with BST rather than drifting an hour twice a year.
 resource "aws_scheduler_schedule" "tick" {
   name = "${var.name_prefix}-tick"
 

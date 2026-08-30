@@ -20,9 +20,9 @@ make capture LEAGUE=...       # refresh testdata from live API
 
 ## Architecture
 
-One Lambda (`cmd/tick`) invoked at 09:00 and 21:00 Europe/London by EventBridge
+One Lambda (`cmd/tick`) invoked hourly (Europe/London) by EventBridge
 Scheduler. There is no per-message schedule: the tick reads live FPL state and
-decides for itself what is due. Full rationale (why twice daily and what that
+decides for itself what is due. Full rationale (why hourly and what that
 costs, why `data_checked`, why the manual copy-paste to WhatsApp) is in
 `README.md` — read it before changing scheduling or delivery behaviour.
 

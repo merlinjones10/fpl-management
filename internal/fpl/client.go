@@ -6,7 +6,9 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"log/slog"
 	"net/http"
+	"strconv"
 	"strings"
 	"time"
 )
@@ -28,12 +30,14 @@ var ErrNotFound = errors.New("fpl: not found")
 type Client struct {
 	http    *http.Client
 	baseURL string
+	log     *slog.Logger
 }
 
 type Option func(*Client)
 
 func WithHTTPClient(h *http.Client) Option { return func(c *Client) { c.http = h } }
 func WithBaseURL(u string) Option          { return func(c *Client) { c.baseURL = u } }
+func WithLogger(log *slog.Logger) Option   { return func(c *Client) { c.log = log } }
 
 func New(opts ...Option) *Client {
 	c := &Client{
@@ -87,6 +91,51 @@ type httpError struct {
 	mitigated string // Cf-Mitigated, "challenge" when a bot rule fired
 	bodyLen   int
 	body      string // one-line, truncated response body
+}
+
+// recordBootstrap emits one CloudWatch Embedded Metric Format event for each
+// completed calendar fetch. The log's timestamp gives the precise failure time;
+// the two metrics make success rate and latency graphable without a separate
+// metrics dependency.
+func (c *Client) recordBootstrap(started time.Time, err error) {
+	if c.log == nil {
+		return
+	}
+
+	outcome := "success"
+	status := http.StatusOK
+	if err != nil {
+		outcome = "failure"
+		status = 0
+		var he *httpError
+		if errors.As(err, &he) {
+			status = he.status
+		}
+	}
+
+	now := time.Now()
+	attrs := []slog.Attr{
+		slog.Any("_aws", map[string]any{
+			"Timestamp": now.UnixMilli(),
+			"CloudWatchMetrics": []any{map[string]any{
+				"Namespace":  "FPLLeagueBot",
+				"Dimensions": [][]string{{"endpoint", "outcome", "http_status"}},
+				"Metrics": []map[string]string{
+					{"Name": "BootstrapFetches", "Unit": "Count"},
+					{"Name": "BootstrapFetchDuration", "Unit": "Milliseconds"},
+				},
+			}},
+		}),
+		slog.String("endpoint", "bootstrap-static"),
+		slog.String("outcome", outcome),
+		slog.String("http_status", strconv.Itoa(status)),
+		slog.Int("bootstrap_fetches", 1),
+		slog.Float64("bootstrap_fetch_duration", float64(now.Sub(started))/float64(time.Millisecond)),
+	}
+	if err != nil {
+		attrs = append(attrs, slog.String("err", err.Error()))
+	}
+	c.log.LogAttrs(context.Background(), slog.LevelInfo, "fpl bootstrap fetch", attrs...)
 }
 
 func (e *httpError) Error() string {
@@ -146,10 +195,13 @@ func (c *Client) do(ctx context.Context, path string, out any) error {
 // Events fetches the gameweek calendar. The bootstrap payload is ~1.6MB and
 // almost all of it is player data we discard.
 func (c *Client) Events(ctx context.Context) ([]Event, error) {
+	started := time.Now()
 	var b Bootstrap
 	if err := getJSON(ctx, c, "/bootstrap-static/", &b); err != nil {
+		c.recordBootstrap(started, err)
 		return nil, err
 	}
+	c.recordBootstrap(started, nil)
 	return b.Events, nil
 }
 

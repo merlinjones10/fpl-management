@@ -160,8 +160,10 @@ deliberately.
 - `cmd/tick` and `cmd/preview` both blank-import `time/tzdata` — the runtime
   carries no zoneinfo and `time.LoadLocation("Europe/London")` would fail at
   startup without it.
-- `infra/terraform.tfvars` is gitignored; `terraform.tfvars.example` is the
-  template.
+- `infra/terraform.tfvars` is **committed** — it holds only league IDs (public),
+  channel names and SSM parameter names, so it is the record of what actually
+  runs. The secrets it points at live in SSM. Any other `*.tfvars` stays
+  gitignored, which is the guard against a webhook URL being pasted into one.
 
 ## Diagram
 

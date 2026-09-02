@@ -147,7 +147,7 @@ Discord.
 ### Deploy
 
 ```bash
-cp infra/terraform.tfvars.example infra/terraform.tfvars   # fill in the leagues
+$EDITOR infra/terraform.tfvars   # committed; edit the leagues in place
 make apply
 make invoke   # run one tick immediately
 make logs     # tail

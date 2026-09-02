@@ -9,6 +9,9 @@ dist/
 infra/.terraform/
 infra/*.tfstate
 infra/*.tfstate.*
+# terraform.tfvars is committed: it holds only league IDs (public, they're in
+# the FPL URL), channel names and SSM parameter *names*. The webhook URLs stay
+# in SSM. Any other tfvars file is still ignored.
 infra/*.tfvars
-!infra/*.tfvars.example
+!infra/terraform.tfvars
 crash.log

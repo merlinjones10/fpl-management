@@ -30,7 +30,7 @@ leagues = {
   b = {
     id            = 486771
     channel       = "slack"
-    webhook_param = "/fpl-league-bot/discord-webhook"
+    webhook_param = "/fpl-league-bot/league-b-webhook"
   }
 }
 
